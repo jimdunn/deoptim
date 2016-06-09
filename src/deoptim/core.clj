@@ -70,22 +70,23 @@
        false)))
 
 (defn init-values
-  "Create a single doubles vector of dimension `d` with values
-   randomly chosen between `lower-bound` and `upper-bound`."
-  ^doubles [d lower-bound upper-bound]
-  (double-array (take d (doubles-seq lower-bound upper-bound))))
+  "Create a single doubles vector of dimension `d` where each value
+   is randomly chosen between the corresponding values in
+  `lower-bounds` and `upper-bounds`."
+  [lower-bounds upper-bounds]
+  (double-array (map next-double lower-bounds upper-bounds)))
 
 (defn init-population
   "Generate initial random population of size `size`
    as a seq of Candidate records."
-  [size d ^double lower-bound ^double upper-bound]
+  [size lower-bounds upper-bounds]
   (into [] (for [_ (range size)
-                 :let [^doubles v (init-values d lower-bound upper-bound)
+                 :let [^doubles v (init-values lower-bounds upper-bounds)
                        cr 0.5
                        f 0.5]]
              (Candidate. v cr f Double/POSITIVE_INFINITY))))
-
-(defn choose-p-best
+  
+  (defn choose-p-best
   "Choose a random Candidate c from the p-best candidates
    in generation."
   [p c generation]
@@ -154,7 +155,7 @@
   "Perform crossover of mutated values.
    Ensure that `lower-bound` and `upper-bound`
    are respected."
-  [jrand lower-bound upper-bound c]
+  [jrand lower-bounds upper-bounds c]
   (let [^doubles x (:values c)
         ^doubles v (:trial-values c)
         crossover-prob (:crossover-prob c)]
@@ -165,13 +166,12 @@
                           (if (or (< (random-double RANDOM) crossover-prob)
                                   (= idx jrand))
                             (cond
-                             (< trial-value lower-bound) (/ (+ value lower-bound) 2)
-                             (> trial-value upper-bound) (/ (+ value upper-bound) 2)
-                             :else trial-value)
+                              (< trial-value (nth lower-bounds idx)) (/ (+ value (nth lower-bounds idx)) 2)
+                              (> trial-value (nth upper-bounds idx)) (/ (+ value (nth upper-bounds idx)) 2)
+                              :else trial-value)
                             value))
                         (range (count x)) ; normal map-indexed only takes 1 coll arg
                         x v)))))
-
 (defn selection
   "Perform selection amongst candidate and trial arrays."
   [fitness-fn archive c]
@@ -183,15 +183,15 @@
 
 (defn evolve-candidate*
   "Evolve a single Candidate from a generation."
-  [fitness-fn generation archive ndist cdist p jrand lower-bound upper-bound c]
+  [fitness-fn generation archive ndist cdist p jrand lower-bounds upper-bounds c]
   (->> (update-cr ndist c)
        (update-f cdist)
        (mutate p generation archive)
-       (crossover jrand lower-bound upper-bound)
+       (crossover jrand lower-bounds upper-bounds)
        (selection fitness-fn archive)))
 
-(defn evolve-candidate [fitness-fn generation archive ndist cdist p jrand lower-bound upper-bound]
-  (partial evolve-candidate* fitness-fn generation archive ndist cdist p jrand lower-bound upper-bound))
+(defn evolve-candidate [fitness-fn generation archive ndist cdist p jrand lower-bounds upper-bounds]
+  (partial evolve-candidate* fitness-fn generation archive ndist cdist p jrand lower-bounds upper-bounds))
 
 ;; fitness-fn should accept a single double array as input and
 ;; return a double.
@@ -200,8 +200,8 @@
 (defn optimize
   "Do optimize the supplied function `fitness-fn` using the
    differential evolution algorithm."
-  [fitness-fn p c np d lower-bound upper-bound maxiter]
-  (loop [generation (init-population np d lower-bound upper-bound)
+  [fitness-fn p c np d lower-bounds upper-bounds maxiter]
+  (loop [generation (init-population np lower-bounds upper-bounds)
          mu-cr 0.5
          mu-f 0.5
          archive []
@@ -210,12 +210,12 @@
           ^CauchyDistribution cdist (CauchyDistribution. mu-f 0.1)
           jrand (random-int RANDOM d)
           new-generation (into [] (pmap
-                                   (evolve-candidate fitness-fn generation archive ndist cdist p jrand lower-bound upper-bound) generation))
+                                   (evolve-candidate fitness-fn generation archive ndist cdist p jrand lower-bounds upper-bounds) generation))
           sorted-generation (sort-by :fitness new-generation)]
       (if (neg? maxiter)
         (first sorted-generation)
         (do
-          #_(println (str "[" maxiter "] best fitness: " (:fitness (first sorted-generation))))
+          ;(println (str "[" maxiter "] best fitness: " (:fitness (first sorted-generation))))
           (recur sorted-generation
                 (update-mu-cr c mu-cr (into #{} (map :crossover-prob new-generation)))
                 (update-mu-f c mu-f (into #{} (map :mutation-factor new-generation)))
@@ -228,5 +228,7 @@
                                  (Math/pow (aget ^doubles xs idx) 2))]
       (areduce ^doubles squares idx ret (double 0)
                (+ ret (aget ^doubles squares idx)))))
-
-  (optimize sphere 0.2 0.1 100 10 -100 100 150))
+  (let [lower (repeat 10 -100) upper (repeat 10 100)]
+    (optimize sphere 0.2 0.1 100 10 lower upper 150)))
+          
+          
